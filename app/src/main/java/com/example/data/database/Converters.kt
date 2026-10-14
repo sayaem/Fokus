@@ -71,4 +71,40 @@ class Converters {
     fun toGoalType(value: String?): PreparationGoalType =
         value?.let { runCatching { PreparationGoalType.valueOf(it) }.getOrDefault(PreparationGoalType.HSC) }
             ?: PreparationGoalType.HSC
+
+    @TypeConverter
+    fun fromApplicationStatus(value: com.example.data.model.ApplicationStatus?): String =
+        value?.name ?: com.example.data.model.ApplicationStatus.NOT_APPLIED.name
+
+    @TypeConverter
+    fun toApplicationStatus(value: String?): com.example.data.model.ApplicationStatus =
+        value?.let { runCatching { com.example.data.model.ApplicationStatus.valueOf(it) }.getOrDefault(com.example.data.model.ApplicationStatus.NOT_APPLIED) }
+            ?: com.example.data.model.ApplicationStatus.NOT_APPLIED
+
+    @TypeConverter
+    fun fromPaymentStatus(value: com.example.data.model.PaymentStatus?): String =
+        value?.name ?: com.example.data.model.PaymentStatus.NOT_REQUIRED.name
+
+    @TypeConverter
+    fun toPaymentStatus(value: String?): com.example.data.model.PaymentStatus =
+        value?.let { runCatching { com.example.data.model.PaymentStatus.valueOf(it) }.getOrDefault(com.example.data.model.PaymentStatus.NOT_REQUIRED) }
+            ?: com.example.data.model.PaymentStatus.NOT_REQUIRED
+
+    @TypeConverter
+    fun fromAdmitCardStatus(value: com.example.data.model.AdmitCardStatus?): String =
+        value?.name ?: com.example.data.model.AdmitCardStatus.NOT_AVAILABLE.name
+
+    @TypeConverter
+    fun toAdmitCardStatus(value: String?): com.example.data.model.AdmitCardStatus =
+        value?.let { runCatching { com.example.data.model.AdmitCardStatus.valueOf(it) }.getOrDefault(com.example.data.model.AdmitCardStatus.NOT_AVAILABLE) }
+            ?: com.example.data.model.AdmitCardStatus.NOT_AVAILABLE
+
+    @TypeConverter
+    fun fromAdmissionEventType(value: com.example.data.model.AdmissionEventType?): String =
+        value?.name ?: com.example.data.model.AdmissionEventType.OTHER.name
+
+    @TypeConverter
+    fun toAdmissionEventType(value: String?): com.example.data.model.AdmissionEventType =
+        value?.let { runCatching { com.example.data.model.AdmissionEventType.valueOf(it) }.getOrDefault(com.example.data.model.AdmissionEventType.OTHER) }
+            ?: com.example.data.model.AdmissionEventType.OTHER
 }

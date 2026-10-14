@@ -54,4 +54,96 @@ class ExampleRobolectricTest {
     assertEquals("Newtonian Mechanics", cleaned2)
     assertEquals("গতিবিদ্যা", cleaned3)
   }
+
+  @Test
+  fun `admission countdown future deadline formats correctly in English and Bangla`() {
+    val now = 1700000000000L // arbitrary fixed time
+    val targetIn5Days = now + (5 * 24 * 3600 * 1000L)
+
+    val event = com.example.data.model.AdmissionEventEntity(
+      universityId = "uni_du",
+      title = "DU A Unit Application Deadline",
+      eventType = com.example.data.model.AdmissionEventType.APPLICATION_DEADLINE,
+      deadlineDateTimeMillis = targetIn5Days,
+      isDateConfirmed = true
+    )
+
+    val resultEn = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+      event = event,
+      language = com.example.ui.localization.AppLanguage.ENGLISH,
+      nowMillis = now
+    )
+    assertEquals("5 days left", resultEn.label)
+    assertEquals(false, resultEn.isPassed)
+    assertEquals(false, resultEn.isUnconfirmed)
+
+    val resultBn = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+      event = event,
+      language = com.example.ui.localization.AppLanguage.BANGLA,
+      nowMillis = now
+    )
+    assertEquals("৫ দিন বাকি", resultBn.label)
+  }
+
+  @Test
+  fun `admission countdown unconfirmed date returns localized not confirmed message`() {
+    val event = com.example.data.model.AdmissionEventEntity(
+      universityId = "uni_buet",
+      title = "BUET Preliminary Test",
+      eventType = com.example.data.model.AdmissionEventType.ADMISSION_TEST,
+      isDateConfirmed = false
+    )
+
+    val resultEn = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+      event = event,
+      language = com.example.ui.localization.AppLanguage.ENGLISH
+    )
+    assertEquals("Date not confirmed", resultEn.label)
+    assertTrue(resultEn.isUnconfirmed)
+
+    val resultBn = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+      event = event,
+      language = com.example.ui.localization.AppLanguage.BANGLA
+    )
+    assertEquals("তারিখ এখনো নির্ধারিত হয়নি", resultBn.label)
+    assertTrue(resultBn.isUnconfirmed)
+  }
+
+  @Test
+  fun `admission countdown deadline passed with incomplete status flags urgent review`() {
+    val now = 1700000000000L
+    val pastDeadline = now - (2 * 3600 * 1000L) // 2 hours ago
+
+    val event = com.example.data.model.AdmissionEventEntity(
+      universityId = "uni_ru",
+      title = "RU Application Deadline",
+      eventType = com.example.data.model.AdmissionEventType.APPLICATION_DEADLINE,
+      deadlineDateTimeMillis = pastDeadline,
+      isDateConfirmed = true
+    )
+
+    val result = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+      event = event,
+      applicationStatus = com.example.data.model.ApplicationStatus.IN_PROGRESS,
+      language = com.example.ui.localization.AppLanguage.ENGLISH,
+      nowMillis = now
+    )
+    assertEquals("Deadline passed", result.label)
+    assertTrue(result.isUrgent)
+    assertTrue(result.isPassed)
+  }
+
+  @Test
+  fun `admission application and payment statuses remain independent`() {
+    val app = com.example.data.model.AdmissionApplicationEntity(
+      universityId = "uni_cu",
+      unitName = "A Unit (Science)",
+      applicationStatus = com.example.data.model.ApplicationStatus.SUBMITTED,
+      paymentStatus = com.example.data.model.PaymentStatus.PAYMENT_PENDING
+    )
+
+    assertEquals(com.example.data.model.ApplicationStatus.SUBMITTED, app.applicationStatus)
+    assertEquals(com.example.data.model.PaymentStatus.PAYMENT_PENDING, app.paymentStatus)
+  }
 }
+

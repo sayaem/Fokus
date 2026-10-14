@@ -76,6 +76,21 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Admission Alert Alarm Receiver -->
+        <receiver
+            android:name=".admission.AdmissionAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Restore scheduled reminders on boot -->
+        <receiver
+            android:name=".admission.AdmissionBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

@@ -21,6 +21,14 @@ import com.example.data.model.SubjectEntity
 import com.example.data.model.SyllabusEntity
 import com.example.data.model.TaskStatus
 import com.example.data.model.TopicEntity
+import com.example.data.model.UniversityEntity
+import com.example.data.model.AdmissionApplicationEntity
+import com.example.data.model.AdmissionEventEntity
+import com.example.data.model.AdmissionEventType
+import com.example.data.model.AdmissionReminderEntity
+import com.example.data.model.AdmissionChecklistEntity
+import com.example.data.model.ApplicationStatus
+import com.example.data.model.PaymentStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
@@ -820,4 +828,232 @@ class FokusRepository(private val dao: FokusDao) {
     }
 
     private fun escapeCsv(str: String): String = str.replace("\"", "\"\"")
+
+    // ==========================================
+    // --- ADMISSION COMMAND CENTER METHODS ---
+    // ==========================================
+
+    // --- Universities ---
+    val allActiveUniversities: Flow<List<UniversityEntity>> = dao.getAllActiveUniversities()
+    fun getUniversityById(id: String): Flow<UniversityEntity?> = dao.getUniversityByIdFlow(id)
+    suspend fun getUniversityByIdSync(id: String): UniversityEntity? = dao.getUniversityById(id)
+    suspend fun insertUniversity(university: UniversityEntity) = dao.insertUniversity(university)
+    suspend fun updateUniversity(university: UniversityEntity) = dao.updateUniversity(university)
+    suspend fun deleteUniversity(university: UniversityEntity) = dao.deleteUniversity(university)
+
+    // --- Applications ---
+    val allActiveApplications: Flow<List<AdmissionApplicationEntity>> = dao.getAllActiveApplications()
+    fun getApplicationsForUniversity(universityId: String): Flow<List<AdmissionApplicationEntity>> =
+        dao.getApplicationsForUniversity(universityId)
+    fun getApplicationById(id: String): Flow<AdmissionApplicationEntity?> = dao.getApplicationByIdFlow(id)
+    suspend fun getApplicationByIdSync(id: String): AdmissionApplicationEntity? = dao.getApplicationById(id)
+
+    suspend fun insertApplication(application: AdmissionApplicationEntity) {
+        dao.insertApplication(application)
+        // Automatically create recommended default checklist for new application
+        createDefaultChecklistsForApplication(application.universityId, application.id)
+    }
+
+    suspend fun updateApplication(application: AdmissionApplicationEntity) = dao.updateApplication(application)
+    suspend fun deleteApplication(application: AdmissionApplicationEntity) = dao.deleteApplication(application)
+
+    // --- Admission Events ---
+    val allActiveAdmissionEvents: Flow<List<AdmissionEventEntity>> = dao.getAllActiveAdmissionEvents()
+    fun getUpcomingAdmissionEvents(now: Long = System.currentTimeMillis()): Flow<List<AdmissionEventEntity>> =
+        dao.getUpcomingAdmissionEvents(now)
+    fun getEventsForUniversity(universityId: String): Flow<List<AdmissionEventEntity>> =
+        dao.getEventsForUniversity(universityId)
+    fun getEventsForApplication(applicationId: String): Flow<List<AdmissionEventEntity>> =
+        dao.getEventsForApplication(applicationId)
+    fun getAdmissionEventsInRange(startMillis: Long, endMillis: Long): Flow<List<AdmissionEventEntity>> =
+        dao.getAdmissionEventsInRange(startMillis, endMillis)
+    suspend fun getEventById(id: String): AdmissionEventEntity? = dao.getEventById(id)
+
+    suspend fun insertAdmissionEvent(event: AdmissionEventEntity, scheduleReminders: Boolean = true) {
+        dao.insertAdmissionEvent(event)
+        if (scheduleReminders && event.isDateConfirmed) {
+            scheduleDefaultRemindersForEvent(event)
+        }
+    }
+
+    suspend fun updateAdmissionEvent(event: AdmissionEventEntity) {
+        dao.updateAdmissionEvent(event)
+        // Reschedule reminders if confirmed date changed
+        dao.deleteRemindersForEvent(event.id)
+        if (event.isDateConfirmed && !event.isCompleted) {
+            scheduleDefaultRemindersForEvent(event)
+        }
+    }
+
+    suspend fun deleteAdmissionEvent(event: AdmissionEventEntity) {
+        dao.deleteRemindersForEvent(event.id)
+        dao.deleteAdmissionEvent(event)
+    }
+
+    // --- Reminders ---
+    fun getActiveFutureReminders(now: Long = System.currentTimeMillis()): Flow<List<AdmissionReminderEntity>> =
+        dao.getActiveFutureReminders(now)
+    fun getRemindersForEvent(eventId: String): Flow<List<AdmissionReminderEntity>> =
+        dao.getRemindersForEvent(eventId)
+    suspend fun insertAdmissionReminder(reminder: AdmissionReminderEntity) =
+        dao.insertAdmissionReminder(reminder)
+    suspend fun updateAdmissionReminder(reminder: AdmissionReminderEntity) =
+        dao.updateAdmissionReminder(reminder)
+    suspend fun deleteAdmissionReminder(reminder: AdmissionReminderEntity) =
+        dao.deleteAdmissionReminder(reminder)
+
+    suspend fun scheduleDefaultRemindersForEvent(event: AdmissionEventEntity) {
+        val targetMillis = event.deadlineDateTimeMillis ?: event.startDateTimeMillis ?: return
+        val now = System.currentTimeMillis()
+
+        // Choose appropriate reminder offsets (in minutes) based on event type
+        val offsetsMinutes = when (event.eventType) {
+            AdmissionEventType.APPLICATION_DEADLINE, AdmissionEventType.PAYMENT_DEADLINE ->
+                listOf(10080L, 4320L, 1440L, 120L) // 7 days, 3 days, 1 day, 2 hours
+            AdmissionEventType.ADMISSION_TEST ->
+                listOf(20160L, 10080L, 4320L, 1440L, 120L) // 14 days, 7 days, 3 days, 1 day, morning
+            AdmissionEventType.ADMIT_CARD_OPENS, AdmissionEventType.ADMIT_CARD_DEADLINE ->
+                listOf(4320L, 1440L, 120L) // 3 days, 1 day, morning
+            else ->
+                listOf(1440L, 120L) // 1 day, 2 hours
+        }
+
+        offsetsMinutes.forEach { offset ->
+            val scheduledTime = targetMillis - (offset * 60 * 1000L)
+            if (scheduledTime > now) {
+                val label = when (offset) {
+                    20160L -> "14 days before"
+                    10080L -> "7 days before"
+                    4320L -> "3 days before"
+                    1440L -> "1 day before"
+                    120L -> "On event day"
+                    else -> "$offset min before"
+                }
+                val reminder = AdmissionReminderEntity(
+                    id = UUID.randomUUID().toString(),
+                    eventId = event.id,
+                    universityId = event.universityId,
+                    applicationId = event.applicationId,
+                    offsetMinutesBefore = offset,
+                    scheduledTimeMillis = scheduledTime,
+                    isEnabled = true,
+                    title = "FOKUS Reminder: ${event.title}",
+                    message = "${event.title} is coming up ($label). Check your status and preparation."
+                )
+                dao.insertAdmissionReminder(reminder)
+            }
+        }
+    }
+
+    // --- Checklists ---
+    fun getChecklistsForUniversity(universityId: String): Flow<List<AdmissionChecklistEntity>> =
+        dao.getChecklistsForUniversity(universityId)
+    fun getChecklistsForApplication(applicationId: String): Flow<List<AdmissionChecklistEntity>> =
+        dao.getChecklistsForApplication(applicationId)
+    suspend fun insertAdmissionChecklist(checklist: AdmissionChecklistEntity) =
+        dao.insertAdmissionChecklist(checklist)
+    suspend fun updateAdmissionChecklist(checklist: AdmissionChecklistEntity) =
+        dao.updateAdmissionChecklist(checklist)
+    suspend fun deleteAdmissionChecklist(checklist: AdmissionChecklistEntity) =
+        dao.deleteAdmissionChecklist(checklist)
+
+    suspend fun createDefaultChecklistsForApplication(universityId: String, applicationId: String) {
+        val defaults = listOf(
+            "Application form completed",
+            "Application fee paid & slip saved",
+            "Application confirmation receipt printed",
+            "Admit card downloaded & color printed",
+            "Original HSC registration & admit card ready",
+            "Exam centre & reporting time verified",
+            "Travel / transport arrangements confirmed",
+            "Exam kit ready (pens, pencils, calculator, ID)"
+        )
+        defaults.forEachIndexed { index, title ->
+            dao.insertAdmissionChecklist(
+                AdmissionChecklistEntity(
+                    id = UUID.randomUUID().toString(),
+                    universityId = universityId,
+                    applicationId = applicationId,
+                    title = title,
+                    isCompleted = false,
+                    sortOrder = index,
+                    isCustom = false
+                )
+            )
+        }
+    }
+
+    // --- Admission Overview Statistics Flow ---
+    val admissionOverviewFlow: Flow<AdmissionOverviewStats> = combine(
+        allActiveUniversities,
+        allActiveApplications,
+        allActiveAdmissionEvents
+    ) { unis, apps, events ->
+        val totalUnis = unis.size
+        val notApplied = apps.count { it.applicationStatus == ApplicationStatus.NOT_APPLIED }
+        val inProgress = apps.count { it.applicationStatus == ApplicationStatus.IN_PROGRESS }
+        val submitted = apps.count { it.applicationStatus == ApplicationStatus.SUBMITTED }
+        val confirmed = apps.count { it.applicationStatus == ApplicationStatus.CONFIRMED }
+        val pendingPayments = apps.count {
+            it.paymentStatus == PaymentStatus.PAYMENT_PENDING &&
+            (it.applicationStatus == ApplicationStatus.IN_PROGRESS || it.applicationStatus == ApplicationStatus.SUBMITTED)
+        }
+
+        val now = System.currentTimeMillis()
+
+        // Nearest application deadline
+        val upcomingDeadlines = events.filter {
+            it.eventType == AdmissionEventType.APPLICATION_DEADLINE &&
+            it.isDateConfirmed &&
+            (it.deadlineDateTimeMillis ?: 0L) >= now
+        }.sortedBy { it.deadlineDateTimeMillis }
+
+        val nearestDeadline = upcomingDeadlines.firstOrNull()
+
+        // Next admission test
+        val upcomingExams = events.filter {
+            it.eventType == AdmissionEventType.ADMISSION_TEST &&
+            it.isDateConfirmed &&
+            (it.startDateTimeMillis ?: it.deadlineDateTimeMillis ?: 0L) >= now
+        }.sortedBy { it.startDateTimeMillis ?: it.deadlineDateTimeMillis }
+
+        val nextExam = upcomingExams.firstOrNull()
+
+        // Urgent applications: deadline in < 3 days and not submitted, or submitted but payment pending
+        val urgentApplications = apps.filter { app ->
+            val hasPendingPayment = app.paymentStatus == PaymentStatus.PAYMENT_PENDING
+            val deadlineClose = app.applicationDeadline != null &&
+                    app.applicationDeadline >= now &&
+                    app.applicationDeadline <= (now + 3 * 24 * 3600 * 1000L) &&
+                    app.applicationStatus != ApplicationStatus.SUBMITTED &&
+                    app.applicationStatus != ApplicationStatus.CONFIRMED
+            hasPendingPayment || deadlineClose
+        }
+
+        AdmissionOverviewStats(
+            totalUniversities = totalUnis,
+            totalApplications = apps.size,
+            notAppliedCount = notApplied,
+            inProgressCount = inProgress,
+            submittedCount = submitted,
+            confirmedCount = confirmed,
+            pendingPaymentCount = pendingPayments,
+            nearestDeadlineEvent = nearestDeadline,
+            nextExamEvent = nextExam,
+            urgentApplicationsCount = urgentApplications.size
+        )
+    }
 }
+
+data class AdmissionOverviewStats(
+    val totalUniversities: Int = 0,
+    val totalApplications: Int = 0,
+    val notAppliedCount: Int = 0,
+    val inProgressCount: Int = 0,
+    val submittedCount: Int = 0,
+    val confirmedCount: Int = 0,
+    val pendingPaymentCount: Int = 0,
+    val nearestDeadlineEvent: AdmissionEventEntity? = null,
+    val nextExamEvent: AdmissionEventEntity? = null,
+    val urgentApplicationsCount: Int = 0
+)

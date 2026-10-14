@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HourglassBottom
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -111,6 +112,7 @@ fun PlannerScreen(
     val chapters by repository.allActiveChapters.collectAsState(initial = emptyList())
     val revisions by repository.allRevisions.collectAsState(initial = emptyList())
     val allTasks by repository.allTasks.collectAsState(initial = emptyList())
+    val admissionStats by repository.admissionOverviewFlow.collectAsState(initial = com.example.data.repository.AdmissionOverviewStats())
 
     var selectedDayOffset by remember { mutableIntStateOf(0) } // 0 = Today, 1 = Tomorrow, etc.
     var showAddTaskDialog by remember { mutableStateOf(false) }
@@ -219,6 +221,112 @@ fun PlannerScreen(
                         selectedLabelColor = FokusOnLime
                     )
                 )
+            }
+        }
+
+        // Admission Exam Milestone Banner (if an exam is confirmed & upcoming)
+        if (admissionStats.nextExamEvent != null) {
+            val nextExam = admissionStats.nextExamEvent!!
+            val countdown = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+                event = nextExam,
+                language = userPrefs.language
+            )
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = FokusElectricLime.copy(alpha = 0.12f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, FokusElectricLime.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = FokusElectricLime,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = strings.admissionExamMilestone,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = FokusElectricLime
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = FokusElectricLime.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = countdown.label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = FokusElectricLime,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = nextExam.title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+
+                    Button(
+                        onClick = {
+                            val prepCandidates = chapters.filter { it.learningStatus != com.example.data.model.LearningStatus.COMPLETED }
+                                .take(3)
+                            val examTasks = prepCandidates.mapIndexed { idx, ch ->
+                                val subName = subjects.firstOrNull { it.id == ch.subjectId }?.title ?: "Subject"
+                                com.example.data.repository.ProposedTask(
+                                    title = "[$subName] ${ch.title} Practice",
+                                    subjectId = ch.subjectId,
+                                    subjectTitle = subName,
+                                    chapterId = ch.id,
+                                    chapterTitle = ch.title,
+                                    topicId = null,
+                                    durationMinutes = 45,
+                                    priority = Priority.URGENT,
+                                    reason = "Targeted prep for upcoming ${nextExam.title} (${countdown.label})",
+                                    isRevision = false
+                                )
+                            }
+                            if (examTasks.isNotEmpty()) {
+                                val totalMin = examTasks.sumOf { it.durationMinutes }
+                                proposedPlanResult = com.example.data.repository.ProposedPlanResult(
+                                    proposedTasks = examTasks,
+                                    totalPlannedMinutes = totalMin,
+                                    availableMinutes = effectiveAvailableMinutes,
+                                    breakMinutesTotal = 15,
+                                    unscheduledBacklogCount = 0,
+                                    unscheduledBacklogPreview = emptyList()
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = FokusElectricLime,
+                            contentColor = FokusOnLime
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(36.dp)
+                    ) {
+                        Text(strings.suggestAdmissionTasks, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
             }
         }
 

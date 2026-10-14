@@ -58,6 +58,7 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.PlannerScreen
 import com.example.ui.screens.RevisionScreen
+import com.example.ui.screens.admission.AdmissionCommandCenterScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.SyllabusScreen
 import com.example.ui.theme.FokusElectricLime
@@ -110,7 +111,8 @@ class MainActivity : ComponentActivity() {
                     } else {
                         MainAppContent(
                             repository = repository,
-                            preferencesManager = preferencesManager
+                            preferencesManager = preferencesManager,
+                            initialNavigateToAdmission = intent?.getStringExtra("navigate_to") == "admission"
                         )
                     }
                 }
@@ -122,7 +124,8 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainAppContent(
     repository: FokusRepository,
-    preferencesManager: PreferencesManager
+    preferencesManager: PreferencesManager,
+    initialNavigateToAdmission: Boolean = false
 ) {
     val strings = LocalFokusStrings.current
 
@@ -135,11 +138,13 @@ fun MainAppContent(
     var isPlannerActive by remember { mutableStateOf(false) }
     var isRevisionQueueActive by remember { mutableStateOf(false) }
     var isDailyJournalActive by remember { mutableStateOf(false) }
+    var isAdmissionActive by remember { mutableStateOf(initialNavigateToAdmission) }
     var focusTargetChapterId by remember { mutableStateOf<String?>(null) }
 
     // Android System Back handling
-    BackHandler(enabled = isBulkAddActive || selectedChapterId != null || isPlannerActive || isRevisionQueueActive || isDailyJournalActive || currentTab != MainNavTab.HOME) {
+    BackHandler(enabled = isBulkAddActive || selectedChapterId != null || isPlannerActive || isRevisionQueueActive || isDailyJournalActive || isAdmissionActive || currentTab != MainNavTab.HOME) {
         when {
+            isAdmissionActive -> isAdmissionActive = false
             isBulkAddActive -> isBulkAddActive = false
             selectedChapterId != null -> selectedChapterId = null
             isPlannerActive -> isPlannerActive = false
@@ -152,7 +157,7 @@ fun MainAppContent(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
-            if (!isBulkAddActive && selectedChapterId == null && !isPlannerActive && !isRevisionQueueActive && !isDailyJournalActive) {
+            if (!isBulkAddActive && selectedChapterId == null && !isPlannerActive && !isRevisionQueueActive && !isDailyJournalActive && !isAdmissionActive) {
                 NavigationBar(
                     modifier = Modifier.navigationBarsPadding(),
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -200,6 +205,13 @@ fun MainAppContent(
                 .padding(innerPadding)
         ) {
             when {
+                isAdmissionActive -> {
+                    AdmissionCommandCenterScreen(
+                        repository = repository,
+                        preferencesManager = preferencesManager,
+                        onBack = { isAdmissionActive = false }
+                    )
+                }
                 isDailyJournalActive -> {
                     DailyStudyJournalScreen(
                         repository = repository,
@@ -270,7 +282,8 @@ fun MainAppContent(
                                 },
                                 onNavigateToRevisions = { isRevisionQueueActive = true },
                                 onNavigateToPlanner = { isPlannerActive = true },
-                                onNavigateToJournal = { isDailyJournalActive = true }
+                                onNavigateToJournal = { isDailyJournalActive = true },
+                                onNavigateToAdmission = { isAdmissionActive = true }
                             )
                             MainNavTab.SYLLABUS -> SyllabusScreen(
                                 repository = repository,

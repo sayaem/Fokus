@@ -64,6 +64,7 @@ import com.example.ui.components.PriorityBadge
 import com.example.ui.localization.LocalFokusStrings
 import com.example.ui.theme.FokusAmber
 import com.example.ui.theme.FokusBlue
+import com.example.ui.theme.FokusCoral
 import com.example.ui.theme.FokusElectricLime
 import com.example.ui.theme.FokusOnLime
 import java.text.SimpleDateFormat
@@ -74,6 +75,7 @@ import java.util.Locale
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.School
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 
@@ -86,10 +88,14 @@ fun HomeScreen(
     onStartFocus: (chapterId: String?) -> Unit,
     onNavigateToRevisions: () -> Unit,
     onNavigateToPlanner: () -> Unit,
-    onNavigateToJournal: () -> Unit = {}
+    onNavigateToJournal: () -> Unit = {},
+    onNavigateToAdmission: () -> Unit = {}
 ) {
     val strings = LocalFokusStrings.current
     val scope = rememberCoroutineScope()
+    val admissionStats by repository.admissionOverviewFlow.collectAsState(
+        initial = com.example.data.repository.AdmissionOverviewStats()
+    )
 
     val progressSummary by repository.syllabusProgressSummary.collectAsState(
         initial = SyllabusProgressSummary(0, 0, 0, 0, 0, 0f, false)
@@ -307,6 +313,124 @@ fun HomeScreen(
                             contentDescription = null,
                             tint = FokusAmber,
                             modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Admission Command Center Integration Card
+        item {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onNavigateToAdmission() },
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = FokusElectricLime,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = strings.admissionCommandCenter.uppercase(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = FokusElectricLime,
+                                letterSpacing = 1.sp
+                            )
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ArrowForward,
+                            contentDescription = "Open Admission Command Center",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+
+                    if (admissionStats.totalUniversities > 0) {
+                        val heroEvent = admissionStats.nearestDeadlineEvent ?: admissionStats.nextExamEvent
+                        if (heroEvent != null) {
+                            val countdown = com.example.admission.AdmissionCountdownEngine.calculateCountdown(
+                                event = heroEvent,
+                                language = LocalFokusStrings.current.let { com.example.ui.localization.AppLanguage.ENGLISH }
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = heroEvent.title,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${admissionStats.totalUniversities} universities tracked • ${admissionStats.submittedCount} submitted",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (countdown.isUrgent) FokusCoral.copy(alpha = 0.2f) else FokusElectricLime.copy(alpha = 0.2f)
+                                ) {
+                                    Text(
+                                        text = countdown.label,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (countdown.isUrgent) FokusCoral else FokusElectricLime,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "${admissionStats.totalUniversities} universities tracked • ${admissionStats.submittedCount} submitted",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Track application deadlines, exam dates and payment statuses",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        // Compact empty invitation
+                        Text(
+                            text = "Track university admissions, deadlines & exams",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Add target universities (BUET, DU, Medical & more) to track deadlines and test dates.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

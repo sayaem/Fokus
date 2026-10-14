@@ -40,9 +40,14 @@ import kotlinx.coroutines.launch
         BlockerConfigEntity::class,
         InterruptionLogEntity::class,
         AuditLogEntity::class,
-        com.example.data.model.DailyJournalEntity::class
+        com.example.data.model.DailyJournalEntity::class,
+        com.example.data.model.UniversityEntity::class,
+        com.example.data.model.AdmissionApplicationEntity::class,
+        com.example.data.model.AdmissionEventEntity::class,
+        com.example.data.model.AdmissionReminderEntity::class,
+        com.example.data.model.AdmissionChecklistEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

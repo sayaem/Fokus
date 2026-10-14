@@ -274,4 +274,124 @@ interface FokusDao {
     suspend fun clearAllData() {
         // Safe clear for import
     }
+
+    // ==========================================
+    // --- ADMISSION COMMAND CENTER DAO ---
+    // ==========================================
+
+    // --- Universities ---
+    @Query("SELECT * FROM admission_universities WHERE isArchived = 0 ORDER BY name ASC")
+    fun getAllActiveUniversities(): Flow<List<com.example.data.model.UniversityEntity>>
+
+    @Query("SELECT * FROM admission_universities WHERE isArchived = 1 ORDER BY updatedAt DESC")
+    fun getArchivedUniversities(): Flow<List<com.example.data.model.UniversityEntity>>
+
+    @Query("SELECT * FROM admission_universities WHERE id = :id LIMIT 1")
+    fun getUniversityByIdFlow(id: String): Flow<com.example.data.model.UniversityEntity?>
+
+    @Query("SELECT * FROM admission_universities WHERE id = :id LIMIT 1")
+    suspend fun getUniversityById(id: String): com.example.data.model.UniversityEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertUniversity(university: com.example.data.model.UniversityEntity)
+
+    @Update
+    suspend fun updateUniversity(university: com.example.data.model.UniversityEntity)
+
+    @Delete
+    suspend fun deleteUniversity(university: com.example.data.model.UniversityEntity)
+
+    // --- Applications / Units ---
+    @Query("SELECT * FROM admission_applications WHERE isArchived = 0 ORDER BY createdAt ASC")
+    fun getAllActiveApplications(): Flow<List<com.example.data.model.AdmissionApplicationEntity>>
+
+    @Query("SELECT * FROM admission_applications WHERE universityId = :universityId AND isArchived = 0 ORDER BY unitName ASC")
+    fun getApplicationsForUniversity(universityId: String): Flow<List<com.example.data.model.AdmissionApplicationEntity>>
+
+    @Query("SELECT * FROM admission_applications WHERE id = :id LIMIT 1")
+    fun getApplicationByIdFlow(id: String): Flow<com.example.data.model.AdmissionApplicationEntity?>
+
+    @Query("SELECT * FROM admission_applications WHERE id = :id LIMIT 1")
+    suspend fun getApplicationById(id: String): com.example.data.model.AdmissionApplicationEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertApplication(application: com.example.data.model.AdmissionApplicationEntity)
+
+    @Update
+    suspend fun updateApplication(application: com.example.data.model.AdmissionApplicationEntity)
+
+    @Delete
+    suspend fun deleteApplication(application: com.example.data.model.AdmissionApplicationEntity)
+
+    // --- Admission Events ---
+    @Query("SELECT * FROM admission_events WHERE isArchived = 0 ORDER BY isDateConfirmed DESC, deadlineDateTimeMillis ASC, startDateTimeMillis ASC")
+    fun getAllActiveAdmissionEvents(): Flow<List<com.example.data.model.AdmissionEventEntity>>
+
+    @Query("SELECT * FROM admission_events WHERE universityId = :universityId AND isArchived = 0 ORDER BY isDateConfirmed DESC, deadlineDateTimeMillis ASC")
+    fun getEventsForUniversity(universityId: String): Flow<List<com.example.data.model.AdmissionEventEntity>>
+
+    @Query("SELECT * FROM admission_events WHERE applicationId = :applicationId AND isArchived = 0 ORDER BY deadlineDateTimeMillis ASC")
+    fun getEventsForApplication(applicationId: String): Flow<List<com.example.data.model.AdmissionEventEntity>>
+
+    @Query("SELECT * FROM admission_events WHERE id = :id LIMIT 1")
+    fun getEventByIdFlow(id: String): Flow<com.example.data.model.AdmissionEventEntity?>
+
+    @Query("SELECT * FROM admission_events WHERE id = :id LIMIT 1")
+    suspend fun getEventById(id: String): com.example.data.model.AdmissionEventEntity?
+
+    @Query("SELECT * FROM admission_events WHERE isArchived = 0 AND isDateConfirmed = 1 AND ((deadlineDateTimeMillis IS NOT NULL AND deadlineDateTimeMillis >= :nowMillis) OR (startDateTimeMillis IS NOT NULL AND startDateTimeMillis >= :nowMillis)) ORDER BY COALESCE(deadlineDateTimeMillis, startDateTimeMillis) ASC")
+    fun getUpcomingAdmissionEvents(nowMillis: Long): Flow<List<com.example.data.model.AdmissionEventEntity>>
+
+    @Query("SELECT * FROM admission_events WHERE isArchived = 0 AND ((deadlineDateTimeMillis >= :startMillis AND deadlineDateTimeMillis <= :endMillis) OR (startDateTimeMillis >= :startMillis AND startDateTimeMillis <= :endMillis)) ORDER BY COALESCE(startDateTimeMillis, deadlineDateTimeMillis) ASC")
+    fun getAdmissionEventsInRange(startMillis: Long, endMillis: Long): Flow<List<com.example.data.model.AdmissionEventEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAdmissionEvent(event: com.example.data.model.AdmissionEventEntity)
+
+    @Update
+    suspend fun updateAdmissionEvent(event: com.example.data.model.AdmissionEventEntity)
+
+    @Delete
+    suspend fun deleteAdmissionEvent(event: com.example.data.model.AdmissionEventEntity)
+
+    // --- Reminders ---
+    @Query("SELECT * FROM admission_reminders WHERE isEnabled = 1 AND scheduledTimeMillis >= :nowMillis ORDER BY scheduledTimeMillis ASC")
+    fun getActiveFutureReminders(nowMillis: Long): Flow<List<com.example.data.model.AdmissionReminderEntity>>
+
+    @Query("SELECT * FROM admission_reminders WHERE isEnabled = 1 AND scheduledTimeMillis >= :nowMillis ORDER BY scheduledTimeMillis ASC")
+    suspend fun getActiveFutureRemindersSync(nowMillis: Long): List<com.example.data.model.AdmissionReminderEntity>
+
+    @Query("SELECT * FROM admission_reminders WHERE eventId = :eventId ORDER BY scheduledTimeMillis ASC")
+    fun getRemindersForEvent(eventId: String): Flow<List<com.example.data.model.AdmissionReminderEntity>>
+
+    @Query("SELECT * FROM admission_reminders WHERE eventId = :eventId")
+    suspend fun getRemindersForEventSync(eventId: String): List<com.example.data.model.AdmissionReminderEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAdmissionReminder(reminder: com.example.data.model.AdmissionReminderEntity)
+
+    @Update
+    suspend fun updateAdmissionReminder(reminder: com.example.data.model.AdmissionReminderEntity)
+
+    @Delete
+    suspend fun deleteAdmissionReminder(reminder: com.example.data.model.AdmissionReminderEntity)
+
+    @Query("DELETE FROM admission_reminders WHERE eventId = :eventId")
+    suspend fun deleteRemindersForEvent(eventId: String)
+
+    // --- Checklists ---
+    @Query("SELECT * FROM admission_checklists WHERE universityId = :universityId ORDER BY sortOrder ASC, createdAt ASC")
+    fun getChecklistsForUniversity(universityId: String): Flow<List<com.example.data.model.AdmissionChecklistEntity>>
+
+    @Query("SELECT * FROM admission_checklists WHERE applicationId = :applicationId ORDER BY sortOrder ASC, createdAt ASC")
+    fun getChecklistsForApplication(applicationId: String): Flow<List<com.example.data.model.AdmissionChecklistEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAdmissionChecklist(checklist: com.example.data.model.AdmissionChecklistEntity)
+
+    @Update
+    suspend fun updateAdmissionChecklist(checklist: com.example.data.model.AdmissionChecklistEntity)
+
+    @Delete
+    suspend fun deleteAdmissionChecklist(checklist: com.example.data.model.AdmissionChecklistEntity)
 }
