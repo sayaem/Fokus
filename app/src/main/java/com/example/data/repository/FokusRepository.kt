@@ -46,6 +46,29 @@ data class SubjectWithProgress(
     val completionPercentage: Float
 )
 
+data class ProposedTask(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val subjectId: String?,
+    val subjectTitle: String,
+    val chapterId: String?,
+    val chapterTitle: String,
+    val topicId: String?,
+    val durationMinutes: Int,
+    val priority: Priority,
+    val reason: String,
+    val isRevision: Boolean = false
+)
+
+data class ProposedPlanResult(
+    val proposedTasks: List<ProposedTask>,
+    val totalPlannedMinutes: Int,
+    val availableMinutes: Int,
+    val breakMinutesTotal: Int,
+    val unscheduledBacklogCount: Int,
+    val unscheduledBacklogPreview: List<String>
+)
+
 class FokusRepository(private val dao: FokusDao) {
 
     // --- Goals & Syllabuses ---
@@ -273,7 +296,7 @@ class FokusRepository(private val dao: FokusDao) {
         if (lines.isEmpty()) return 0
 
         // Get existing chapters count for custom order offset
-        val existingChapters = dao.getChaptersForSubject(subjectId)
+        val existingChapters = dao.getChaptersForSubjectSync(subjectId)
         val initialOrder = System.currentTimeMillis().toInt() % 1000
 
         val newChapters = lines.mapIndexed { index, title ->
@@ -293,6 +316,51 @@ class FokusRepository(private val dao: FokusDao) {
 
         dao.insertChapters(newChapters)
         return newChapters.size
+    }
+
+    suspend fun insertBulkChapters(
+        subjectId: String,
+        chapters: List<ChapterEntity>,
+        conflictStrategy: String = "SKIP_DUPLICATES"
+    ): Int {
+        if (chapters.isEmpty()) return 0
+        val existing = dao.getChaptersForSubjectSync(subjectId)
+        val existingTitles = existing.associateBy { it.title.trim().lowercase() }
+
+        val toInsert = mutableListOf<ChapterEntity>()
+        val toUpdate = mutableListOf<ChapterEntity>()
+
+        chapters.forEach { candidate ->
+            val match = existingTitles[candidate.title.trim().lowercase()]
+            if (match != null) {
+                when (conflictStrategy) {
+                    "OVERWRITE" -> {
+                        toUpdate.add(
+                            match.copy(
+                                chapterNumber = candidate.chapterNumber,
+                                estimatedDurationMinutes = candidate.estimatedDurationMinutes,
+                                priority = candidate.priority,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                    "APPEND" -> {
+                        toInsert.add(candidate)
+                    }
+                    else -> {
+                        // "SKIP_DUPLICATES" -> skip
+                    }
+                }
+            } else {
+                toInsert.add(candidate)
+            }
+        }
+
+        if (toInsert.isNotEmpty()) {
+            dao.insertChapters(toInsert)
+        }
+        toUpdate.forEach { dao.updateChapter(it) }
+        return toInsert.size + toUpdate.size
     }
 
     private fun cleanChapterTitle(raw: String): String {
@@ -374,10 +442,32 @@ class FokusRepository(private val dao: FokusDao) {
         }
     }
 
+    // --- Revisions Management ---
     suspend fun completeRevision(record: RevisionRecordEntity, confidenceRating: Int, notes: String) {
+        completeRevisionWithOutcome(
+            record = record,
+            outcome = when {
+                confidenceRating >= 4 -> "EASY"
+                confidenceRating <= 2 -> "DIFFICULT"
+                else -> "OKAY"
+            },
+            confidenceRating = confidenceRating,
+            notes = notes,
+            customIntervals = listOf(1, 3, 7, 14, 30)
+        )
+    }
+
+    suspend fun completeRevisionWithOutcome(
+        record: RevisionRecordEntity,
+        outcome: String, // "EASY", "OKAY", "DIFFICULT"
+        confidenceRating: Int,
+        notes: String,
+        customIntervals: List<Int>
+    ): Int {
         val updated = record.copy(
             completedAt = System.currentTimeMillis(),
             confidenceRating = confidenceRating,
+            outcomeRating = outcome,
             notes = notes,
             status = RevisionStatus.REVISED
         )
@@ -392,6 +482,279 @@ class FokusRepository(private val dao: FokusDao) {
                 )
             )
         }
+
+        // Determine next interval based on outcome
+        val nextIntervalDays = when (outcome.uppercase()) {
+            "DIFFICULT" -> 1 // Review next day if struggled
+            "EASY" -> {
+                val nextIdx = (record.revisionCount).coerceAtMost(customIntervals.size - 1)
+                customIntervals[nextIdx]
+            }
+            else -> { // "OKAY"
+                val nextIdx = (record.revisionCount - 1).coerceIn(0, customIntervals.size - 1)
+                customIntervals[nextIdx]
+            }
+        }
+
+        val nextScheduledMillis = System.currentTimeMillis() + (nextIntervalDays * 86400000L)
+        val nextRecord = RevisionRecordEntity(
+            id = UUID.randomUUID().toString(),
+            subjectId = record.subjectId,
+            chapterId = record.chapterId,
+            topicId = record.topicId,
+            scheduledAt = nextScheduledMillis,
+            revisionCount = record.revisionCount + 1,
+            notes = "Round #${record.revisionCount + 1} ($outcome feedback)",
+            status = RevisionStatus.SCHEDULED
+        )
+        dao.insertRevision(nextRecord)
+
+        return nextIntervalDays
+    }
+
+    suspend fun rescheduleRevision(record: RevisionRecordEntity, newScheduledAtMillis: Long) {
+        dao.updateRevision(
+            record.copy(
+                scheduledAt = newScheduledAtMillis,
+                status = RevisionStatus.SCHEDULED
+            )
+        )
+    }
+
+    suspend fun skipRevision(record: RevisionRecordEntity) {
+        dao.updateRevision(
+            record.copy(
+                status = RevisionStatus.REVISED,
+                notes = (record.notes + " [Skipped]").trim(),
+                completedAt = System.currentTimeMillis()
+            )
+        )
+    }
+
+    // --- Daily Study Journal ---
+    val allJournalEntries: Flow<List<com.example.data.model.DailyJournalEntity>> = dao.getAllJournalEntries()
+
+    fun getJournalEntryForDate(startOfDay: Long, endOfDay: Long): Flow<com.example.data.model.DailyJournalEntity?> =
+        dao.getJournalEntryForDate(startOfDay, endOfDay)
+
+    fun getJournalEntryById(id: String): Flow<com.example.data.model.DailyJournalEntity?> =
+        dao.getJournalEntryById(id)
+
+    suspend fun saveJournalEntry(entry: com.example.data.model.DailyJournalEntity) =
+        dao.insertJournalEntry(entry)
+
+    suspend fun updateJournalEntry(entry: com.example.data.model.DailyJournalEntity) =
+        dao.updateJournalEntry(entry)
+
+    suspend fun deleteJournalEntry(entry: com.example.data.model.DailyJournalEntity) =
+        dao.deleteJournalEntry(entry)
+
+    // --- Smart Daily Plan Generation (Feature One) ---
+    suspend fun generateDailyPlan(
+        availableMinutes: Int,
+        sessionDurationMinutes: Int = 50,
+        breakDurationMinutes: Int = 10,
+        preferredSubjectIds: Set<String> = emptySet(),
+        dateMillis: Long,
+        chapters: List<ChapterEntity>,
+        subjects: List<SubjectEntity>,
+        revisions: List<RevisionRecordEntity>,
+        existingTasks: List<StudyTaskEntity>
+    ): ProposedPlanResult {
+        val subjectMap = subjects.associateBy { it.id }
+        val chapterMap = chapters.associateBy { it.id }
+
+        // Time already committed to non-cancelled existing tasks
+        val existingCommittedMinutes = existingTasks.filter { it.status != TaskStatus.SKIPPED }
+            .sumOf { it.plannedDurationMinutes }
+        val netAvailableMinutes = (availableMinutes - existingCommittedMinutes).coerceAtLeast(0)
+
+        val candidateList = mutableListOf<ProposedTask>()
+
+        val now = System.currentTimeMillis()
+        val calendar = java.util.Calendar.getInstance().apply {
+            timeInMillis = dateMillis
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+        }
+        val startOfDay = calendar.timeInMillis
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 23)
+        calendar.set(java.util.Calendar.MINUTE, 59)
+        calendar.set(java.util.Calendar.SECOND, 59)
+        val endOfDay = calendar.timeInMillis
+
+        // 1. Overdue revisions
+        val overdueRevisions = revisions.filter {
+            it.scheduledAt < startOfDay && it.status != RevisionStatus.REVISED
+        }
+        overdueRevisions.forEach { rev ->
+            val ch = chapterMap[rev.chapterId]
+            val sub = subjectMap[rev.subjectId]
+            candidateList.add(
+                ProposedTask(
+                    title = "Revise: ${ch?.title ?: "Overdue Topic"}",
+                    subjectId = rev.subjectId,
+                    subjectTitle = sub?.title ?: "General",
+                    chapterId = rev.chapterId,
+                    chapterTitle = ch?.title ?: "",
+                    topicId = rev.topicId,
+                    durationMinutes = 35.coerceAtMost(sessionDurationMinutes),
+                    priority = Priority.URGENT,
+                    reason = "Overdue revision (scheduled on ${formatDateShort(rev.scheduledAt)})",
+                    isRevision = true
+                )
+            )
+        }
+
+        // 2. Revisions due today
+        val todayRevisions = revisions.filter {
+            it.scheduledAt in startOfDay..endOfDay && it.status != RevisionStatus.REVISED
+        }
+        todayRevisions.forEach { rev ->
+            val ch = chapterMap[rev.chapterId]
+            val sub = subjectMap[rev.subjectId]
+            candidateList.add(
+                ProposedTask(
+                    title = "Review: ${ch?.title ?: "Due Chapter"}",
+                    subjectId = rev.subjectId,
+                    subjectTitle = sub?.title ?: "General",
+                    chapterId = rev.chapterId,
+                    chapterTitle = ch?.title ?: "",
+                    topicId = rev.topicId,
+                    durationMinutes = 35.coerceAtMost(sessionDurationMinutes),
+                    priority = Priority.HIGH,
+                    reason = "Spaced repetition scheduled for today",
+                    isRevision = true
+                )
+            )
+        }
+
+        // 3. Incomplete / in-progress chapters
+        val inProgressChapters = chapters.filter { it.learningStatus == LearningStatus.IN_PROGRESS }
+        inProgressChapters.forEach { ch ->
+            val sub = subjectMap[ch.subjectId]
+            candidateList.add(
+                ProposedTask(
+                    title = "Continue: ${ch.title}",
+                    subjectId = ch.subjectId,
+                    subjectTitle = sub?.title ?: "General",
+                    chapterId = ch.id,
+                    chapterTitle = ch.title,
+                    topicId = null,
+                    durationMinutes = sessionDurationMinutes,
+                    priority = ch.priority,
+                    reason = "In-progress chapter nearing completion"
+                )
+            )
+        }
+
+        // 4. Unstarted high & urgent priority chapters
+        val unstartedChapters = chapters.filter { it.learningStatus == LearningStatus.NOT_STARTED }
+            .sortedWith(compareByDescending<ChapterEntity> { it.priority == Priority.URGENT || it.priority == Priority.HIGH }
+                .thenBy { if (preferredSubjectIds.contains(it.subjectId)) 0 else 1 }
+                .thenBy { it.customOrder })
+
+        unstartedChapters.forEach { ch ->
+            val sub = subjectMap[ch.subjectId]
+            candidateList.add(
+                ProposedTask(
+                    title = "Master: ${ch.title}",
+                    subjectId = ch.subjectId,
+                    subjectTitle = sub?.title ?: "General",
+                    chapterId = ch.id,
+                    chapterTitle = ch.title,
+                    topicId = null,
+                    durationMinutes = sessionDurationMinutes,
+                    priority = ch.priority,
+                    reason = if (ch.priority == Priority.URGENT || ch.priority == Priority.HIGH)
+                        "High priority exam syllabus chapter"
+                    else
+                        "Next chapter in syllabus sequence"
+                )
+            )
+        }
+
+        // Distinct by chapter to avoid repetitive tasks
+        val seenChapters = mutableSetOf<String>()
+        val dedupedCandidates = candidateList.filter {
+            if (it.chapterId != null) {
+                val key = "${it.chapterId}_${it.isRevision}"
+                if (seenChapters.contains(key)) false else {
+                    seenChapters.add(key)
+                    true
+                }
+            } else true
+        }
+
+        // Fit into available minutes
+        val acceptedTasks = mutableListOf<ProposedTask>()
+        val unscheduledBacklog = mutableListOf<String>()
+        var allocatedMinutes = 0
+        var totalBreakMinutes = 0
+
+        for (candidate in dedupedCandidates) {
+            val taskMinutes = candidate.durationMinutes
+            val potentialTotal = allocatedMinutes + taskMinutes + (if (acceptedTasks.isNotEmpty()) breakDurationMinutes else 0)
+            if (potentialTotal <= netAvailableMinutes) {
+                if (acceptedTasks.isNotEmpty()) {
+                    totalBreakMinutes += breakDurationMinutes
+                }
+                allocatedMinutes += taskMinutes
+                acceptedTasks.add(candidate)
+            } else {
+                unscheduledBacklog.add("${candidate.title} (${candidate.durationMinutes}m)")
+            }
+        }
+
+        return ProposedPlanResult(
+            proposedTasks = acceptedTasks,
+            totalPlannedMinutes = allocatedMinutes,
+            availableMinutes = availableMinutes,
+            breakMinutesTotal = totalBreakMinutes,
+            unscheduledBacklogCount = unscheduledBacklog.size,
+            unscheduledBacklogPreview = unscheduledBacklog.take(5)
+        )
+    }
+
+    suspend fun acceptProposedPlan(tasks: List<ProposedTask>, dateMillis: Long) {
+        val calendar = java.util.Calendar.getInstance().apply {
+            timeInMillis = dateMillis
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+        }
+        val startOfDay = calendar.timeInMillis
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 23)
+        calendar.set(java.util.Calendar.MINUTE, 59)
+        calendar.set(java.util.Calendar.SECOND, 59)
+        val endOfDay = calendar.timeInMillis
+
+        // Clear only auto-generated pending tasks for this day to allow safe regeneration
+        dao.deleteAutoGeneratedPendingTasks(startOfDay, endOfDay)
+
+        val taskEntities = tasks.mapIndexed { index, task ->
+            StudyTaskEntity(
+                id = UUID.randomUUID().toString(),
+                title = task.title,
+                description = task.reason,
+                subjectId = task.subjectId,
+                chapterId = task.chapterId,
+                topicId = task.topicId,
+                plannedDate = dateMillis,
+                plannedDurationMinutes = task.durationMinutes,
+                priority = task.priority,
+                status = TaskStatus.PLANNED,
+                recommendedReason = task.reason,
+                isAutoGenerated = true,
+                orderIndex = index
+            )
+        }
+        dao.insertTasks(taskEntities)
+    }
+
+    private fun formatDateShort(millis: Long): String {
+        return java.text.SimpleDateFormat("dd MMM", java.util.Locale.getDefault()).format(java.util.Date(millis))
     }
 
     // --- Notes & Mistakes ---
@@ -435,11 +798,6 @@ class FokusRepository(private val dao: FokusDao) {
         root.put("version", 1)
         root.put("appName", "FOKUS")
         root.put("exportedAt", System.currentTimeMillis())
-
-        // Collect entities
-        // Let's create JSON arrays
-        val subjectsArray = JSONArray()
-        // Subjects
         return root.toString(2)
     }
 

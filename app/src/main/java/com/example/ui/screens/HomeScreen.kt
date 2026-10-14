@@ -71,6 +71,12 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+
 @Composable
 fun HomeScreen(
     repository: FokusRepository,
@@ -79,9 +85,11 @@ fun HomeScreen(
     onNavigateToChapter: (String) -> Unit,
     onStartFocus: (chapterId: String?) -> Unit,
     onNavigateToRevisions: () -> Unit,
-    onNavigateToPlanner: () -> Unit
+    onNavigateToPlanner: () -> Unit,
+    onNavigateToJournal: () -> Unit = {}
 ) {
     val strings = LocalFokusStrings.current
+    val scope = rememberCoroutineScope()
 
     val progressSummary by repository.syllabusProgressSummary.collectAsState(
         initial = SyllabusProgressSummary(0, 0, 0, 0, 0, 0f, false)
@@ -391,8 +399,11 @@ fun HomeScreen(
                         Checkbox(
                             checked = task.status == TaskStatus.COMPLETED,
                             onCheckedChange = { checked ->
-                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).run {
-                                    // launch task status update
+                                scope.launch {
+                                    repository.updateTaskStatus(
+                                        task,
+                                        if (checked) TaskStatus.COMPLETED else TaskStatus.PLANNED
+                                    )
                                 }
                             },
                             colors = CheckboxDefaults.colors(
@@ -428,6 +439,57 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+
+        // Daily Study Journal Shortcut Card
+        item {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable { onNavigateToJournal() },
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                        Icon(
+                            imageVector = Icons.Default.EditNote,
+                            contentDescription = null,
+                            tint = FokusElectricLime,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = strings.journalTitle,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Record daily takeaways, stumbling blocks & self-reflection",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.ArrowForward,
+                        contentDescription = "Open Journal",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

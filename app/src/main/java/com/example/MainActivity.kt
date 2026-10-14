@@ -52,6 +52,7 @@ import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.BlockerScreen
 import com.example.ui.screens.BulkChapterEntryScreen
 import com.example.ui.screens.ChapterDetailScreen
+import com.example.ui.screens.DailyStudyJournalScreen
 import com.example.ui.screens.FocusScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.OnboardingScreen
@@ -133,15 +134,17 @@ fun MainAppContent(
     var isBulkAddActive by remember { mutableStateOf(false) }
     var isPlannerActive by remember { mutableStateOf(false) }
     var isRevisionQueueActive by remember { mutableStateOf(false) }
+    var isDailyJournalActive by remember { mutableStateOf(false) }
     var focusTargetChapterId by remember { mutableStateOf<String?>(null) }
 
     // Android System Back handling
-    BackHandler(enabled = isBulkAddActive || selectedChapterId != null || isPlannerActive || isRevisionQueueActive || currentTab != MainNavTab.HOME) {
+    BackHandler(enabled = isBulkAddActive || selectedChapterId != null || isPlannerActive || isRevisionQueueActive || isDailyJournalActive || currentTab != MainNavTab.HOME) {
         when {
             isBulkAddActive -> isBulkAddActive = false
             selectedChapterId != null -> selectedChapterId = null
             isPlannerActive -> isPlannerActive = false
             isRevisionQueueActive -> isRevisionQueueActive = false
+            isDailyJournalActive -> isDailyJournalActive = false
             currentTab != MainNavTab.HOME -> currentTab = MainNavTab.HOME
         }
     }
@@ -149,7 +152,7 @@ fun MainAppContent(
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
-            if (!isBulkAddActive && selectedChapterId == null && !isPlannerActive && !isRevisionQueueActive) {
+            if (!isBulkAddActive && selectedChapterId == null && !isPlannerActive && !isRevisionQueueActive && !isDailyJournalActive) {
                 NavigationBar(
                     modifier = Modifier.navigationBarsPadding(),
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -197,6 +200,12 @@ fun MainAppContent(
                 .padding(innerPadding)
         ) {
             when {
+                isDailyJournalActive -> {
+                    DailyStudyJournalScreen(
+                        repository = repository,
+                        onBack = { isDailyJournalActive = false }
+                    )
+                }
                 isBulkAddActive -> {
                     BulkChapterEntryScreen(
                         repository = repository,
@@ -219,16 +228,19 @@ fun MainAppContent(
                 isPlannerActive -> {
                     PlannerScreen(
                         repository = repository,
+                        preferencesManager = preferencesManager,
                         onStartFocus = { chId ->
                             focusTargetChapterId = chId
                             isPlannerActive = false
                             currentTab = MainNavTab.FOCUS
-                        }
+                        },
+                        onNavigateToJournal = { isDailyJournalActive = true }
                     )
                 }
                 isRevisionQueueActive -> {
                     RevisionScreen(
                         repository = repository,
+                        preferencesManager = preferencesManager,
                         onStartFocus = { chId ->
                             focusTargetChapterId = chId
                             isRevisionQueueActive = false
@@ -257,7 +269,8 @@ fun MainAppContent(
                                     currentTab = MainNavTab.FOCUS
                                 },
                                 onNavigateToRevisions = { isRevisionQueueActive = true },
-                                onNavigateToPlanner = { isPlannerActive = true }
+                                onNavigateToPlanner = { isPlannerActive = true },
+                                onNavigateToJournal = { isDailyJournalActive = true }
                             )
                             MainNavTab.SYLLABUS -> SyllabusScreen(
                                 repository = repository,

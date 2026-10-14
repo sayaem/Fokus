@@ -39,9 +39,10 @@ import kotlinx.coroutines.launch
         MistakeRecordEntity::class,
         BlockerConfigEntity::class,
         InterruptionLogEntity::class,
-        AuditLogEntity::class
+        AuditLogEntity::class,
+        com.example.data.model.DailyJournalEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
