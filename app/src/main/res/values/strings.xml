@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FOKUS</string>
+    <string name="accessibility_service_desc">FOKUS uses this service exclusively to detect when selected distracting apps are opened during your active focus sessions to help you maintain study discipline.</string>
+</resources>

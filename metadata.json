@@ -1,0 +1,6 @@
+{
+  "name": "FOKUS",
+  "description": "Study smarter and stay disciplined: manual syllabus management, revision queue, focus timer, and application distraction blocker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
